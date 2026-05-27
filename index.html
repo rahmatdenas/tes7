@@ -26,12 +26,29 @@
     <div class="loader"></div>
   </div>
   <section id="index" class="panel-content" data-display="flex">
-    <header>
-      <label for="filter">Filter</label>
-      <div id="filter">
-        <select>
-          <option value="all">Semua masjid – </option>
-        </select>
+<header>
+      <label>Filter Wilayah & Fitur</label>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        
+        <div class="filter-box">
+          <select id="filter-region">
+            <option value="all">Semua Wilayah – </option>
+          </select>
+        </div>
+        
+        <div id="filter-features" style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
+          <button class="feat-btn active" id="btn-all" data-filter="all">Semua</button>
+          <button class="feat-btn" id="btn-image" data-filter="image">Ber-Gambar</button>
+          <button class="feat-btn" id="btn-article" data-filter="article">Ber-Artikel Wikipedia</button>
+          </div>
+
+        <div class="filter-box" style="margin-top: 5px;">
+          <select id="sort-order">
+            <option value="alphabetical">Urutkan: Abjad (A-Z)</option>
+            <option value="age">Urutkan: Usia (Tertua Pertama)</option>
+          </select>
+        </div>
+
       </div>
     </header>
     <ol id="index-list"></ol>
@@ -61,3 +78,4 @@
 <script src="js/eph-heritage-sites.js"></script>
 </body>
 </html>
+
