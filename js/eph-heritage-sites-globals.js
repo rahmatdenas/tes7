@@ -54,18 +54,10 @@ const DESIGNATION_TYPES = {
 // 4. SPARQL_QUERY_0: Mengambil data masjid, filter wilayah, properti P131 & P571 (dengan presisi)
 const SPARQL_QUERY_0 =
 `SELECT ?siteQid ?siteLabel ?designationQid ?p131Label ?tahunBerdiriMentah ?tahunPresisi WHERE {
-  {
-    # 1. Kunci wilayahnya
-    VALUES ?designation { wd:Q6019 wd:Q6024 wd:Q6038 wd:Q6032 wd:Q6042 wd:Q6048 wd:Q6103 wd:Q6065 wd:Q6055 wd:Q6058 wd:Q6083 wd:Q6093 wd:Q7248 wd:Q7253 wd:Q7256 wd:Q7258 wd:Q7261 wd:Q7263 wd:Q7266 }    
-    # 2. Matikan otak otomatis server
-    hint:Query hint:optimizer "None" .
-    
-    # 3. Cari SEMUA item di wilayah tersebut DULU
-    ?site wdt:P131+ ?designation .
-    
-    # 4. BARU saring yang berstatus Masjid
-    ?site wdt:P31 wd:Q32815 . 
-  }
+  VALUES ?designation { wd:Q6019 wd:Q6024 wd:Q6038 wd:Q6032 wd:Q6042 wd:Q6048 wd:Q6103 wd:Q6065 wd:Q6055 wd:Q6058 wd:Q6083 wd:Q6093 wd:Q7248 wd:Q7253 wd:Q7256 wd:Q7258 wd:Q7261 wd:Q7263 wd:Q7266 }    
+  
+  ?site wdt:P31 wd:Q32815 . 
+  ?site wdt:P131+ ?designation .
   
   ?site rdfs:label ?siteLabel . FILTER(LANG(?siteLabel) = "id") .
   
