@@ -33,7 +33,7 @@ nav li a:hover {
   color: #eaa;
 }
 
-#filter {
+.filter-box {
   position: relative;
   width: 300px;
   border-radius: 6px;
@@ -43,7 +43,7 @@ nav li a:hover {
   background-repeat: no-repeat;
 }
 
-#index header select {
+.filter-box select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -235,4 +235,28 @@ optgroup option {
 
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
   background: #822;
+}
+
+.feat-btn {
+  background-color: #f3e9e9;
+  border: 1px solid #eaa;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #822;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease-in-out;
+}
+
+.feat-btn:hover {
+  background-color: #eaa;
+  color: #fff;
+}
+
+/* Tampilan tombol saat sedang aktif (terpilih) */
+.feat-btn.active {
+  background-color: #822;
+  color: #fff;
+  border-color: #822;
 }
