@@ -50,19 +50,38 @@ function formatWikidataDate(dateString, precision) {
 // FUNGSI UTAMA
 // ============================================================
 function loadPrimaryData() {
-  doPreProcessing();
-  populateDesignationTypesData()
-    .then(() => {
-      // Menjalankan pencarian BERSAMAAN (Paralel)
-      return Promise.all([
-        populateCoordinatesData().then(populateMapAndIndex), // Jalur 1
-        populateImageAndWikipediaData(),                     // Jalur 2
-        populateImportantEventsData()                        // Jalur 3: PERISTIWA PENTING
-      ]);
-    })
-    .then(enableApp);
-}
 
+  doPreProcessing();
+
+  populateDesignationTypesData()
+
+    .then(() => {
+
+      // Menjalankan pencarian BERSAMAAN (Paralel)
+
+      return Promise.all([
+
+        populateCoordinatesData().then(populateMapAndIndex), // Jalur 1: Koordinat
+
+        populateImageAndWikipediaData(),                     // Jalur 2: Gambar & Artikel
+
+        populateImportantEventsData()                        // Jalur 3: Peristiwa Penting
+
+      ]);
+
+    })
+
+    .then(() => {
+
+      // KODE BARU: Paksa hitung ulang setelah SEMUA jalur data selesai
+
+      updateFeatureCounts(); 
+
+      enableApp();
+
+    });
+
+}
 function doPreProcessing() {
   let anchorElem = document.getElementById('wdqs-link');
   anchorElem.href = 'https://query.wikidata.org/#' + encodeURIComponent(ABOUT_SPARQL_QUERY);
@@ -102,10 +121,15 @@ function populateDesignationTypesData() {
       }
 
       // LOGIKA TAHUN BERDIRI (P571) & PRESISI
-      if (!record.tahunBerdiri && result.tahunBerdiriMentah && result.tahunBerdiriMentah.value) {
+if (!record.tahunBerdiri && result.tahunBerdiriMentah && result.tahunBerdiriMentah.value) {
         let precision = result.tahunPresisi ? result.tahunPresisi.value : 9;
         record.tahunBerdiri = formatWikidataDate(result.tahunBerdiriMentah.value, precision);
+        
+        // KODE BARU: Simpan string waktu mentah (ISO) untuk keperluan sorting usia
+        // (Pastikan baris ini berada DI DALAM kurung kurawal 'if')
+        record.rawTahunBerdiri = result.tahunBerdiriMentah.value.replace(/^[+-]/, '');
       }
+
     },
     function() {
       populateDesignationIndex();
@@ -254,9 +278,15 @@ function populateMapAndIndex() {
 function populateDesignationIndexNodes() {
   Object.values(Records).forEach(record => {
     if (record.mapMarker) DesignationIndex.all.mapMarkers.push(record.mapMarker);
-    DesignationIndex.all.indexLis  .push(record.indexLi);
+    DesignationIndex.all.indexLis.push(record.indexLi);
+    
     Object.keys(record.designations).forEach(typeQid => {
       let orgId = DESIGNATION_TYPES[typeQid].org;
+      
+      // KODE BARU: Memberikan stempel tag wilayah ke setiap record
+      record.areaTags.add(typeQid);
+      record.areaTags.add(orgId);
+
       if (record.mapMarker) {
         DesignationIndex[typeQid].mapMarkers.push(record.mapMarker);
         DesignationIndex[orgId  ].mapMarkers.push(record.mapMarker);
@@ -265,6 +295,7 @@ function populateDesignationIndexNodes() {
       DesignationIndex[orgId  ].indexLis.push(record.indexLi);
     });
   });
+  
   Object.values(DesignationIndex).forEach(indexItem => {
     indexItem.indexLis = indexItem.indexLis
       .map(li => [li, li.textContent])
@@ -273,10 +304,18 @@ function populateDesignationIndexNodes() {
   });
 }
 
+// Variabel State Global
+let currentRegionFilter = 'all';
+let activeFeatures = new Set(); 
+let currentSortMode = 'alphabetical'; // Mode urut bawaan
+
 function generateFilterSelect() {
-  let select = document.querySelector('#filter select');
-  select.options[0].textContent += DesignationIndex.all.total;
-  let optgroup;
+  let selectRegion = document.getElementById('filter-region');
+  let selectSort = document.getElementById('sort-order');
+  
+  // 1. Bangun Master Dropdown (Wilayah)
+  selectRegion.innerHTML = `<option value="all">Semua Wilayah – ${DesignationIndex.all.total}</option>`;
+  
   Object.keys(DESIGNATION_TYPES)
     .filter(qid => !('partOf' in DESIGNATION_TYPES[qid]))
     .map(qid => [qid, DESIGNATION_TYPES[qid].order]) 
@@ -284,27 +323,139 @@ function generateFilterSelect() {
     .map(item => item[0])
     .forEach(qid => {
       let type = DESIGNATION_TYPES[qid];
-      if (type.order % 100 === 1) {
-        optgroup = document.createElement('optgroup');
-        optgroup.label = ORGS[type.org];
-        select.appendChild(optgroup);
-      }
       let option = document.createElement('option');
       option.value = qid;
       option.textContent = `${type.name} – ${DesignationIndex[qid].total}`;
-      optgroup.appendChild(option);
+      selectRegion.appendChild(option);
     });
-  select.addEventListener('change', function() {
-    let qid = select.options[select.selectedIndex].value;
-    Cluster.clearLayers();
-    Cluster.addLayers(DesignationIndex[qid].mapMarkers);
-    Map.fitBounds(Cluster.getBounds());
-    let ol = document.getElementById('index-list');
-    ol.innerHTML = '';
-    DesignationIndex[qid].indexLis.forEach(li => { ol.appendChild(li) });
-    select.blur();
+
+  updateFeatureCounts();
+
+  // 2. Event Listener Wilayah
+  selectRegion.addEventListener('change', function() {
+    currentRegionFilter = this.value;
+    updateFeatureCounts(); 
+    applyIntersectionFilter();
+    this.blur();
+  });
+
+  // 3. Event Listener Pengurutan (SORTING)
+  selectSort.addEventListener('change', function() {
+    currentSortMode = this.value;
+    applyIntersectionFilter(); // Eksekusi render ulang dengan urutan baru
+    this.blur();
+  });
+
+  // 4. Event Listener Tombol Fitur Toggle
+  let btnAll = document.getElementById('btn-all');
+  let featButtons = document.querySelectorAll('.feat-btn:not(#btn-all)');
+
+  btnAll.addEventListener('click', function() {
+    activeFeatures.clear();
+    btnAll.classList.add('active');
+    featButtons.forEach(b => b.classList.remove('active'));
+    applyIntersectionFilter();
+  });
+
+  featButtons.forEach(btn => {
+    btn.addEventListener('click', function() {
+      let filterType = this.getAttribute('data-filter');
+
+      if (activeFeatures.has(filterType)) {
+        activeFeatures.delete(filterType);
+        this.classList.remove('active');
+      } else {
+        activeFeatures.add(filterType);
+        this.classList.add('active');
+      }
+
+      if (activeFeatures.size === 0) {
+        btnAll.classList.add('active');
+      } else {
+        btnAll.classList.remove('active');
+      }
+
+      applyIntersectionFilter();
+    });
   });
 }
+
+// Menghitung dinamis (Menghapus countYear karena fiturnya sudah diganti menjadi fungsi urut)
+function updateFeatureCounts() {
+  let countAll = 0, countImage = 0, countArticle = 0;
+
+  Object.values(Records).forEach(record => {
+    let inRegion = (currentRegionFilter === 'all' || record.areaTags.has(currentRegionFilter));
+    
+    if (inRegion) {
+      countAll++;
+      if (record.imageFilename) countImage++;
+      if (record.articleTitle !== undefined) countArticle++;
+    }
+  });
+
+  document.getElementById('btn-all').textContent = `Semua (${countAll})`;
+  document.getElementById('btn-image').textContent = `Ber-Gambar (${countImage})`;
+  document.getElementById('btn-article').textContent = `Ber-Artikel Wikipedia (${countArticle})`;
+}
+
+// Fungsi Eksekutor & Algoritma Pengurutan Baru
+function applyIntersectionFilter() {
+  Cluster.clearLayers();
+  let ol = document.getElementById('index-list');
+  ol.innerHTML = '';
+
+  let validMarkers = [];
+  
+  let validRecords = Object.values(Records).filter(record => {
+    let matchRegion = (currentRegionFilter === 'all' || record.areaTags.has(currentRegionFilter));
+    let matchFeature = true;
+    
+    // Cek tombol fitur (menghapus pengecekan 'year')
+    if (activeFeatures.size > 0) {
+      if (activeFeatures.has('image') && !record.imageFilename) matchFeature = false;
+      if (activeFeatures.has('article') && record.articleTitle === undefined) matchFeature = false;
+    }
+    return matchRegion && matchFeature;
+
+  }).sort((a, b) => {
+    
+    // LOGIKA PENGURUTAN BARU
+    if (currentSortMode === 'age') {
+      let aHasYear = !!a.rawTahunBerdiri;
+      let bHasYear = !!b.rawTahunBerdiri;
+
+      if (aHasYear && bHasYear) {
+        // Jika keduanya punya tahun, urutkan dari yang usianya paling tua (angka tahun terkecil)
+        return a.rawTahunBerdiri.localeCompare(b.rawTahunBerdiri);
+      } else if (aHasYear && !bHasYear) {
+        // Jika A punya tahun dan B tidak, A ditaruh di atas
+        return -1;
+      } else if (!aHasYear && bHasYear) {
+        // Jika B punya tahun dan A tidak, B ditaruh di atas
+        return 1;
+      } else {
+        // Jika keduanya tidak punya tahun, urutkan berdasarkan abjad sebagai penentu terakhir
+        return a.indexTitle.localeCompare(b.indexTitle);
+      }
+    } else {
+      // Mode default: Urut murni berdasarkan Abjad (A-Z)
+      return a.indexTitle.localeCompare(b.indexTitle);
+    }
+    
+  });
+
+  validRecords.forEach(record => {
+    if (record.mapMarker) validMarkers.push(record.mapMarker);
+    if (record.indexLi) ol.appendChild(record.indexLi);
+  });
+
+  if (validMarkers.length > 0) {
+    Cluster.addLayers(validMarkers);
+    Map.fitBounds(Cluster.getBounds());
+  }
+}
+
 
 function activateSite(qid) {
   displayRecordDetails(qid);
@@ -381,9 +532,32 @@ function generateRecordDetails(qid) {
     
   designationsHtml += '</ul>';
 
+// ====================================================================
   // CETAK HTML PERISTIWA PENTING
+  // ====================================================================
   let eventsHtml = '';
   if (record.events && record.events.length > 0) {
+    
+    // 1. KODE BARU: Kamus Bobot Urutan (Semua huruf kecil agar kebal dari salah ketik Wikidata)
+    const EVENT_ORDER = {
+      'pembebasan tanah': 1,
+      'peletakan batu pertama': 2,
+      'konstruksi': 3,
+      'dibuka untuk umum': 4,
+      'upacara pembukaan': 5,
+      'perombakan': 6,
+      'renovasi': 6
+    };
+
+    // 2. KODE BARU: Urutkan array events sebelum dicetak
+    record.events.sort((a, b) => {
+      // Ambil bobot berdasarkan label. Jika label tidak ada di kamus, beri bobot 99 (taruh di paling bawah)
+      let orderA = EVENT_ORDER[a.label.toLowerCase()] || 99;
+      let orderB = EVENT_ORDER[b.label.toLowerCase()] || 99;
+      return orderA - orderB;
+    });
+
+    // 3. Cetak ke HTML seperti biasa
     eventsHtml += '<h2>Peristiwa Penting</h2><ul class="designations" style="margin-left:-65px"><li>';
     
     record.events.forEach(ev => {
@@ -393,6 +567,7 @@ function generateRecordDetails(qid) {
     
     eventsHtml += '</li></ul>';
   }
+  // ====================================================================
 
   let panelElem = document.createElement('div');
   
@@ -507,15 +682,30 @@ class DesignationIndexEntry {
 
 class Record {
   constructor(isCompound) {
-    this.isCompound    = isCompound;
-    this.title         = undefined;
+
+    this.isCompound = isCompound;
+
+    this.title = undefined;
+
     this.imageFilename = '';
-    this.articleTitle  = undefined;
-    this.designations  = {};
-    this.panelElem     = undefined;
-    this.indexLi       = undefined;
-    this.tahunBerdiri  = undefined;
-    this.events        = []; 
+
+    this.articleTitle = undefined;
+
+    this.designations = {};
+
+    this.panelElem = undefined;
+
+    this.indexLi = undefined;
+
+    this.tahunBerdiri = undefined;
+
+    this.rawTahunBerdiri = undefined;
+
+    this.events = [];
+
+    this.areaTags = new Set();
+
+    this.vicinityImages = [];
   }
 }
 
